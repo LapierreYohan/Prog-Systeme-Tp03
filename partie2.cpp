@@ -1,4 +1,4 @@
-#define TEMPS_ECRITURE 1
+#define TEMPS_ECRITURE 0.5
 
 #include <unistd.h>
 #include <iostream>
@@ -6,19 +6,46 @@
 #include <sys/wait.h>
 #include <thread>
 #include <mutex>
+#include <cstring>
 
 #include "sema.h"
 
 using namespace std;
 //g++ -std=c++11 -pthread -o index.exe index.cpp
 
-//CSemaphore sp(0);
-//CSemaphore sf(1);
+int nbLecteur = 0;
+
+CSemaphore nbActive(1); //mutex pour lecteurActive
+CSemaphore partage(1); //mutex pour la zone partage
 
 void lecteur ();
 void redacteur ();
 
-ofstream sortie("match.txt", ios::out);
+void demanderLecture() {
+    nbActive.wait();
+    if (nbLecteur == 0)
+        partage.wait();
+    nbLecteur++;
+    nbActive.notify();
+}
+
+void signalerFinLecture() {
+    nbActive.wait();
+    nbLecteur--;
+    if (nbLecteur == 0)
+        partage.notify();
+    nbActive.notify();
+}
+
+void demanderEcriture() {
+    partage.wait();
+}
+
+void signalerFinEcriture() {
+    partage.notify();
+}
+
+ofstream s("match.txt", ios::out);
 
 char chaine[6][10] = {"Bonjour","Hola","Que tal","Hello","Hi","Halo"};
 
@@ -27,9 +54,9 @@ int main(int argc, char const *argv[]) //argc => Nb d'argument dans ./partie2.ex
     //std :: thread first ( lecteur ); // Cr ́eation du premier thread , qui ex ́ecute ping
     //std :: thread second ( redacteur ); // Cr ́eation du deuxi`eme thread , qui ex ́ecute pong
 
-    std :: cout << " Initialisation des Threads" ;
+    std :: cout << "Initialisation des Threads" << endl;
 
-    int tot;
+    int tot = 5;
 
     if (argc == 2){
         tot = atoi(argv[1]);
@@ -37,17 +64,17 @@ int main(int argc, char const *argv[]) //argc => Nb d'argument dans ./partie2.ex
 
     srand(time(NULL));
 
-    for (size_t i = 0; i < tot; i++)
+    thread t;
+    int random = 0;
+    for (int i = 0; i < tot; i++)
     {
-        thread t;
-        int random = rand() % 5;
-        if (random == 3 || random == 4){
+        random = rand() % 5;
+        if (random == 4 || random == 3){
             t = thread(redacteur);
-            t.detach();
         } else {
             t = thread(lecteur);
-            t.detach();
         }
+        t.detach();
         sleep(1);
     }
 
@@ -56,28 +83,35 @@ int main(int argc, char const *argv[]) //argc => Nb d'argument dans ./partie2.ex
 
 void lecteur ()
 {
+    demanderLecture();
+    cout << "Début de lecture : ";
     ifstream entrer("match.txt", ios::in);
-    cout << "Début de lecture : " << endl;
-    while(entrer.eof()){
-        char* temp;
+    char temp[100];
+
+    while(!entrer.eof()){
         entrer >> temp;
-        cout << temp << endl; 
+        cout << temp <<endl; 
     }
-    entrer.close();
-    cout << "Fin de lecture : " << endl;
+    cout << endl;
+    entrer.close(); 
+    signalerFinLecture();
 }
 void redacteur ()
 {
-    cout << "Début d'ecriture : " << endl;
+    demanderEcriture();
+    cout << "Début d'ecriture : ";
     srand(time(NULL));
     int rd = rand() % 6;
     char* txt = chaine[rd];
     cout << "J'ai choisi le mot : " << txt << endl;
-    for(int i = 0; i < sizeof(txt); i++){
+    ofstream sortie("match.txt", ios::app);
+    for(int i = 0; i < strlen(chaine[rd]); i++){
         sortie << txt[i];
+        sortie.flush();
         sleep(TEMPS_ECRITURE);
     }
     sortie << "\n";
-    sortie.flush();
-    cout << "Fin de l'ecriture: " << endl;
+    sortie.close();
+
+    signalerFinEcriture();
 }
